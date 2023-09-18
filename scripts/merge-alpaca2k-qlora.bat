@@ -1,0 +1,1 @@
+python .\merge-qlora.py --base_model "PY007/TinyLlama-1.1B-step-50K-105b" --peft_model ..\src\lora-out\ --local_path merged
