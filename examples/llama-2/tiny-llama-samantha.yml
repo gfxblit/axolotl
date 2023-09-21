@@ -12,9 +12,9 @@ strict: false
 datasets:
   - path: ../../datasets/samantha-1.1.json
     type: sharegpt:chat
-taset_prepared_path: last_run_prepared
+dataset_prepared_path: last_run_prepared
 val_set_size: 0.01
-output_dir: ./tiny-llama-sam-lora-out
+output_dir: ../../drive/MyDrive/tiny-llama-sam-lora-out
 
 sequence_len: 4096
 sample_packing: true
@@ -27,15 +27,15 @@ lora_dropout: 0.05
 lora_target_linear: true
 lora_fan_in_fan_out:
 
-wandb_project:
+wandb_project: tiny-llama-samantha
 wandb_entity:
 wandb_watch:
 wandb_run_id:
 wandb_log_model:
 
-gradient_accumulation_steps: 4
-micro_batch_size: 2
-num_epochs: 3
+gradient_accumulation_steps: 1
+micro_batch_size: 1
+num_epochs: 1
 optimizer: adamw_bnb_8bit
 lr_scheduler: cosine
 learning_rate: 0.0002
@@ -43,9 +43,9 @@ learning_rate: 0.0002
 train_on_inputs: false
 group_by_length: false
 bf16: false
-fp16: false
+fp16: true
 tf32: false
-float16: true
+float16: false
 
 gradient_checkpointing: true
 early_stopping_patience:
@@ -53,11 +53,11 @@ resume_from_checkpoint:
 local_rank:
 logging_steps: 1
 xformers_attention:
-flash_attention: false
+flash_attention:
 
 warmup_steps: 10
 eval_steps: 20
-eval_table_size: 5
+eval_table_size: 0
 save_steps:
 debug:
 deepspeed:
