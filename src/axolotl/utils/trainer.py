@@ -8,11 +8,12 @@ from contextlib import contextmanager
 from dataclasses import dataclass, field
 from functools import partial
 from pathlib import Path
-from typing import Optional, Union
+from typing import List, Optional, Union
 
 import numpy as np
 import torch
 import torch.cuda
+import torch.distributed as dist
 import transformers
 from datasets import Dataset, set_caching_enabled
 from torch.optim.lr_scheduler import OneCycleLR
@@ -27,15 +28,20 @@ from transformers.trainer_pt_utils import SequentialDistributedSampler
 
 from axolotl.monkeypatch.relora import ReLoRACallback, ReLoRAScheduler
 from axolotl.utils.callbacks import (
+    EvalFirstStepCallback,
     GPUStatsCallback,
     SaveBetterTransformerModelCallback,
-    SavePeftModelCallback,
     bench_eval_callback_factory,
     log_prediction_callback_factory,
 )
 from axolotl.utils.collators import DataCollatorForSeq2Seq
 from axolotl.utils.dataloader import MultipackDistributedDataloader
-from axolotl.utils.distributed import is_main_process, zero_first
+from axolotl.utils.distributed import (
+    is_distributed,
+    is_main_process,
+    reduce_and_broadcast,
+    zero_first,
+)
 from axolotl.utils.schedulers import get_cosine_schedule_with_quadratic_warmup
 
 LOG = logging.getLogger("axolotl")
@@ -423,7 +429,7 @@ def calculate_total_num_steps(cfg, train_dataset, tokenizer):
                 .apply(lambda x: len(x))  # pylint: disable=unnecessary-lambda
                 .values
             )
-            LOG.info(f"📝 UPDATE CONFIG WITH: `total_num_tokens: {total_num_tokens}`")
+            LOG.info(f"total_num_tokens: {total_num_tokens}")
             cfg.total_num_tokens = total_num_tokens
 
         if not cfg.total_supervised_tokens:
@@ -456,7 +462,16 @@ def calculate_total_num_steps(cfg, train_dataset, tokenizer):
                 f"total_num_tokens: {cfg.total_num_tokens}, total_num_steps: {total_num_steps}"
             )
         else:
-            sampler = RandomSampler(train_dataset)
+            if cfg.world_size > 1 and is_distributed():
+                sampler = DistributedSampler(
+                    train_dataset,
+                    num_replicas=cfg.world_size,
+                    rank=dist.get_rank(),
+                    seed=cfg.seed or 42,
+                )
+            else:
+                sampler = RandomSampler(train_dataset)
+
             data_loader = MultipackDistributedDataloader(
                 train_dataset,
                 batch_size=cfg.micro_batch_size,
@@ -474,18 +489,23 @@ def calculate_total_num_steps(cfg, train_dataset, tokenizer):
             data_loader_len = data_loader.len_w_stats()
             actual_eff = data_loader.efficiency()
             LOG.info(f"data_loader_len: {data_loader_len}")
-            total_num_steps = int(
-                math.floor(
-                    data_loader_len
-                    * cfg.micro_batch_size
-                    * cfg.num_epochs
-                    // cfg.batch_size
-                )
+            # FIXME: is there a bug here somewhere? the total num steps depends
+            # on the agreed on value for sample_packing_eff_est
+            total_num_steps = int(math.floor(data_loader_len * cfg.num_epochs))
+
+            def calc_sample_packing_eff_est(estimates: List[float]):
+                LOG.info(f"sample_packing_eff_est across ranks: {repr(estimates)}")
+                return max(estimates)
+
+            sample_packing_actual_eff_all = reduce_and_broadcast(
+                lambda: actual_eff,
+                calc_sample_packing_eff_est,
             )
-            LOG.info(
-                f"📝 UPDATE CONFIG WITH: `sample_packing_eff_est: {math.ceil(actual_eff * 100.0) / 100.0}`"
+            sample_packing_eff_est = (
+                math.ceil(sample_packing_actual_eff_all * 100.0) / 100.0
             )
-            cfg.sample_packing_eff_est = math.ceil(actual_eff * 100.0) / 100.0
+            cfg.sample_packing_eff_est = sample_packing_eff_est
+            LOG.info(f"sample_packing_eff_est: {cfg.sample_packing_eff_est}")
     else:
         total_num_steps = int(
             math.ceil(len(train_dataset) * cfg.num_epochs / cfg.batch_size)
@@ -655,6 +675,7 @@ def setup_trainer(cfg, train_dataset, eval_dataset, model, tokenizer, total_num_
             (cfg.load_best_model_at_end is not False or cfg.early_stopping_patience)
             and cfg.val_set_size > 0
             and cfg.save_steps
+            and cfg.eval_steps
             and cfg.save_steps % cfg.eval_steps == 0
         )
         or False,
@@ -684,15 +705,10 @@ def setup_trainer(cfg, train_dataset, eval_dataset, model, tokenizer, total_num_
 
     callbacks = []
     callbacks.append(GPUStatsCallback(cfg))
+    callbacks.append(EvalFirstStepCallback)
 
     if cfg.relora_steps:
         callbacks.append(ReLoRACallback(cfg))
-
-    if cfg.local_rank == 0 and cfg.adapter in [
-        "lora",
-        "qlora",
-    ]:  # only save in rank 0
-        callbacks.append(SavePeftModelCallback)
 
     if hasattr(model, "use_bettertransformer") and model.use_bettertransformer is True:
         callbacks.append(SaveBetterTransformerModelCallback)

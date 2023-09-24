@@ -31,6 +31,7 @@ Features:
   - [How to Use Custom Pretokenized Dataset](#how-to-use-your-custom-pretokenized-dataset)
 - [Config](#config)
   - [Train](#train)
+  - [Training w/ Deepspeed](#training-with-deepspeed)
   - [Inference](#inference)
   - [Merge LORA to Base](#merge-lora-to-base)
 - [Common Errors](#common-errors-)
@@ -86,7 +87,7 @@ git clone https://github.com/OpenAccess-AI-Collective/axolotl
 cd axolotl
 
 pip3 install packaging
-pip3 install -e .[flash-attn]
+pip3 install -e .[flash-attn,deepspeed]
 pip3 install -U git+https://github.com/huggingface/peft.git
 
 # finetune lora
@@ -121,7 +122,7 @@ accelerate launch -m axolotl.cli.inference examples/openllama-3b/lora.yml \
   3. Install axolotl along with python dependencies
         ```bash
         pip3 install packaging
-        pip3 install -e .[flash-attn]
+        pip3 install -e .[flash-attn,deepspeed]
         ```
 
 - LambdaLabs
@@ -157,7 +158,7 @@ accelerate launch -m axolotl.cli.inference examples/openllama-3b/lora.yml \
   cd axolotl
 
   pip3 install packaging
-  pip3 install -e .[flash-attn]
+  pip3 install -e .[flash-attn,deepspeed]
   pip3 install protobuf==3.20.3
   pip3 install -U --ignore-installed requests Pillow psutil scipy
   ```
@@ -434,10 +435,10 @@ datasets:
   - path: vicgalle/alpaca-gpt4
   # The type of prompt to use for training. [alpaca, sharegpt, gpteacher, oasst, reflection]
     type: alpaca # format | format:<prompt_style> (chat/instruct) | <prompt_strategies>.load_<load_fn>
-    ds_type: # Optional[str] (json|arrow|parquet) defines the datatype when path is a file
-    data_files: # path to source data files
-    shards: # number of shards to split data into
-    name: # name of dataset configuration to load
+    ds_type: # Optional[str] (json|arrow|parquet|text|csv) defines the datatype when path is a file
+    data_files: # Optional[str] path to source data files
+    shards: # Optional[int] number of shards to split data into
+    name: # Optional[str] name of dataset configuration to load
 
   # custom user prompt
   - path: repo
@@ -492,6 +493,8 @@ pad_to_sequence_len:
 max_packed_sequence_len: 1024
 # use efficient multi-packing with block diagonal attention and per sequence position_ids. Recommend set to 'true'
 sample_packing:
+# set to 'false' if getting errors during eval with sample_packing on.
+eval_sample_packing:
 # you can set these packing optimizations AFTER starting a training at least once.
 # The trainer will provide recommended values for these values.
 sample_packing_eff_est:
@@ -715,11 +718,6 @@ fsdp_config:
   fsdp_transformer_layer_cls_to_wrap: LlamaDecoderLayer
 ```
 
-- llama Deepspeed
-```yaml
-deepspeed: deepspeed/zero3.json
-```
-
 ##### Weights & Biases Logging
 
 - wandb options
@@ -730,6 +728,24 @@ wandb_entity:
 wandb_watch:
 wandb_run_id:
 wandb_log_model:
+```
+
+### Training with Deepspeed
+
+Deepspeed is an optimization suite for multi-gpu systems allowing you to train much larger models than you
+might typically be able to fit into your GPU's VRAM. More information about the various optimization types
+for deepspeed is available at https://huggingface.co/docs/accelerate/main/en/usage_guides/deepspeed#what-is-integrated
+
+We provide several default deepspeed JSON configurations for ZeRO stage 1, 2, and 3.
+
+```shell
+accelerate launch -m axolotl.cli.train examples/llama-2/config.py --deepspeed deepspeed/zero1.json
+```
+
+or
+
+```yaml
+deepspeed: deepspeed/zero1.json
 ```
 
 ### Inference

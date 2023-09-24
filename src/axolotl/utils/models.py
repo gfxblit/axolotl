@@ -10,6 +10,7 @@ import torch
 import transformers
 from optimum.bettertransformer import BetterTransformer
 from peft import PeftConfig, prepare_model_for_kbit_training
+from peft.tuners.lora import QuantLinear
 from transformers import (  # noqa: F401
     AutoConfig,
     AutoModelForCausalLM,
@@ -100,9 +101,30 @@ def load_model(
     base_model = cfg.base_model
     base_model_config = cfg.base_model_config
     model_type = cfg.model_type
+    model_config = load_model_config(cfg)
 
     # TODO refactor as a kwarg
     load_in_8bit = cfg.load_in_8bit
+
+    if hasattr(model_config, "model_type") and model_config.model_type == "btlm":
+        if cfg.flash_attention:
+            from axolotl.monkeypatch.btlm_attn_hijack_flash import (
+                replace_btlm_attn_with_flash_attn,
+            )
+
+            replace_btlm_attn_with_flash_attn(cfg.base_model)
+
+    if hasattr(model_config, "model_type") and model_config.model_type in [
+        "falcon",
+        "RefinedWebModel",
+        "RefinedWeb",
+    ]:
+        if cfg.flash_attention:
+            from axolotl.monkeypatch.falcon_attn_hijack_flash import (
+                replace_falcon_attn_with_flash_attn,
+            )
+
+            replace_falcon_attn_with_flash_attn()
 
     if cfg.is_llama_derived_model and cfg.flash_attention:
         if cfg.device not in ["mps", "cpu"] and not inference:
@@ -154,8 +176,6 @@ def load_model(
         LOG.info("patching _expand_mask")
         hijack_expand_mask()
 
-    model_config = load_model_config(cfg)
-
     # special handling b/c remote MixFormers code doesn't have _no_split_modules set
     if (
         "MixFormerSequentialConfig" in model_config.__class__.__name__
@@ -177,6 +197,10 @@ def load_model(
         if not hasattr(model_config, "quantization_config"):
             LOG.warning("model config does not contain quantization_config information")
         else:
+            if cfg.gptq_disable_exllama is not None:
+                model_config.quantization_config[
+                    "disable_exllama"
+                ] = cfg.gptq_disable_exllama
             model_kwargs["quantization_config"] = GPTQConfig(
                 **model_config.quantization_config
             )
@@ -286,16 +310,26 @@ def load_model(
             ):
                 config.max_sequence_length = cfg.sequence_len
                 LOG.warning(f"increasing context length to {cfg.sequence_len}")
-            model = AutoModelForCausalLM.from_pretrained(
-                base_model,
-                config=config,
-                device_map=cfg.device_map,
-                load_in_8bit=cfg.load_in_8bit and cfg.adapter is not None,
-                load_in_4bit=cfg.load_in_4bit and cfg.adapter is not None,
-                torch_dtype=cfg.torch_dtype,
-                trust_remote_code=cfg.trust_remote_code or False,
-                **model_kwargs,
-            )
+            if cfg.gptq:
+                model = AutoModelForCausalLM.from_pretrained(
+                    base_model,
+                    config=config,
+                    device_map=cfg.device_map,
+                    torch_dtype=cfg.torch_dtype,
+                    trust_remote_code=cfg.trust_remote_code or False,
+                    **model_kwargs,
+                )
+            else:
+                model = AutoModelForCausalLM.from_pretrained(
+                    base_model,
+                    config=config,
+                    device_map=cfg.device_map,
+                    load_in_8bit=cfg.load_in_8bit and cfg.adapter is not None,
+                    load_in_4bit=cfg.load_in_4bit and cfg.adapter is not None,
+                    torch_dtype=cfg.torch_dtype,
+                    trust_remote_code=cfg.trust_remote_code or False,
+                    **model_kwargs,
+                )
     except Exception as err:  # pylint: disable=broad-exception-caught
         LOG.error(
             "Exception raised attempting to load model, retrying with AutoModelForCausalLM"
@@ -338,6 +372,9 @@ def load_model(
     for name, module in model.named_modules():
         if "norm" in name:
             module.to(torch.float32)
+        if model_config.model_type == "btlm":
+            # don't upcast lm_head for btlm
+            continue
         if "lm_head" in name or "embed_tokens" in name:
             if hasattr(module, "weight"):
                 module.to(torch.float32)
@@ -440,10 +477,10 @@ def load_llama_adapter(model, cfg):
 
 
 def find_all_linear_names(model):
-    cls = (bnb.nn.Linear4bit, bnb.nn.Linear8bitLt, torch.nn.Linear)
+    cls = (bnb.nn.Linear4bit, bnb.nn.Linear8bitLt, torch.nn.Linear, QuantLinear)
     lora_module_names = set()
     for name, module in model.named_modules():
-        if isinstance(module, cls):
+        if isinstance(module, cls) or "Linear" in module.__class__.__name__:
             names = name.split(".")
             lora_module_names.add(names[0] if len(names) == 1 else names[-1])
 
