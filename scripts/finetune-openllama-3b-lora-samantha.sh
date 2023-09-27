@@ -1,0 +1,1 @@
+accelerate launch --num_processes=3 -m axolotl.cli.train ../examples/openllama-3b/openllama-3b-lora-samantha.yml --output_dir="openllama-3b-lora-samantha-out"
