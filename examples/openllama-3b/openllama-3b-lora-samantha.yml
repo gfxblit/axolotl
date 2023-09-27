@@ -31,7 +31,7 @@ wandb_run_id:
 wandb_log_model:
 
 gradient_accumulation_steps: 1
-micro_batch_size: 1
+micro_batch_size: 2
 num_epochs: 1
 optimizer: adamw_bnb_8bit
 torchdistx_path:
@@ -49,6 +49,7 @@ tf32: false
 gradient_checkpointing: true
 early_stopping_patience:
 resume_from_checkpoint:
+auto_resume_from_checkpoints: true
 local_rank:
 logging_steps: 1
 xformers_attention:
@@ -59,7 +60,8 @@ gptq_model_v1:
 warmup_steps: 10
 eval_steps: 20
 eval_table_size: 0
-save_steps:
+save_steps: 50
+save_total_limit: 2
 debug:
 deepspeed:
 weight_decay: 0.1
