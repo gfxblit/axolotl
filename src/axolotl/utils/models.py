@@ -114,26 +114,18 @@ def load_model(
 
             replace_btlm_attn_with_flash_attn(cfg.base_model)
 
-    if hasattr(model_config, "model_type") and model_config.model_type in [
-        "falcon",
-        "RefinedWebModel",
-        "RefinedWeb",
-    ]:
-        if cfg.flash_attention:
-            from axolotl.monkeypatch.falcon_attn_hijack_flash import (
-                replace_falcon_attn_with_flash_attn,
-            )
-
-            replace_falcon_attn_with_flash_attn()
-
-    if cfg.is_llama_derived_model and cfg.flash_attention:
+    if cfg.is_llama_derived_model and cfg.flash_attention and cfg.sample_packing:
         if cfg.device not in ["mps", "cpu"] and not inference:
             from axolotl.monkeypatch.llama_attn_hijack_flash import (
                 replace_llama_attn_with_flash_attn,
             )
 
-            LOG.info("patching with flash attention")
-            replace_llama_attn_with_flash_attn(packed=cfg.sample_packing)
+            LOG.info("patching with flash attention for sample packing")
+            replace_llama_attn_with_flash_attn(
+                packed=cfg.sample_packing,
+                cross_entropy=cfg.flash_attn_cross_entropy,
+                rms_norm=cfg.flash_attn_rms_norm,
+            )
     elif cfg.is_llama_derived_model and cfg.xformers_attention:
         from axolotl.monkeypatch.llama_attn_hijack_xformers import (
             hijack_llama_attention,
@@ -157,6 +149,14 @@ def load_model(
 
         # Note: This might overwrite previous additional_special_tokens
         tokenizer.add_special_tokens({"additional_special_tokens": [MEM_TOKEN]})
+
+    if cfg.is_mistral_derived_model and cfg.flash_attention:
+        from axolotl.monkeypatch.mistral_attn_hijack_flash import (
+            replace_mistral_attn_with_flash_attn,
+        )
+
+        LOG.info("patching with flash attention")
+        replace_mistral_attn_with_flash_attn(packed=cfg.sample_packing)
 
     if cfg.is_llama_derived_model and cfg.xpos_rope:
         from axolotl.monkeypatch.xpos_rope_llama_monkey_patch import (
@@ -213,6 +213,10 @@ def load_model(
             bnb_4bit_use_double_quant=True,
             bnb_4bit_quant_type="nf4",
         )
+    # sample packing uses custom FA2 patch
+    if cfg.flash_attention and not cfg.sample_packing:
+        if cfg.is_llama_derived_model or cfg.is_falcon_derived_model:
+            model_kwargs["use_flash_attention_2"] = True
     try:
         if cfg.is_llama_derived_model and not cfg.trust_remote_code and not cfg.gptq:
             from transformers import LlamaForCausalLM

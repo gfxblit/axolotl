@@ -4,9 +4,9 @@ torch==2.0.1
 auto-gptq
 packaging
 peft @ git+https://github.com/huggingface/peft.git
-transformers @ git+https://github.com/huggingface/transformers.git
+transformers @ git+https://github.com/huggingface/transformers.git@78dd120
 bitsandbytes>=0.41.1
-accelerate @ git+https://github.com/huggingface/accelerate
+accelerate @ git+https://github.com/huggingface/accelerate@80da9cfb09bb3cc9f1b385cb55d6b90d025a5fd9
 deepspeed
 addict
 evaluate
@@ -31,3 +31,4 @@ scipy
 scikit-learn==1.2.2
 pynvml
 art
+fschat==0.2.29

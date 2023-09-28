@@ -87,7 +87,7 @@ git clone https://github.com/OpenAccess-AI-Collective/axolotl
 cd axolotl
 
 pip3 install packaging
-pip3 install -e .[flash-attn,deepspeed]
+pip3 install -e '.[flash-attn,deepspeed]'
 pip3 install -U git+https://github.com/huggingface/peft.git
 
 # finetune lora
@@ -122,8 +122,13 @@ accelerate launch -m axolotl.cli.inference examples/openllama-3b/lora.yml \
   3. Install axolotl along with python dependencies
         ```bash
         pip3 install packaging
-        pip3 install -e .[flash-attn,deepspeed]
+        pip3 install -e '.[flash-attn,deepspeed]'
         ```
+  4. (Optional) Login to Huggingface to use gated models/datasets.
+        ```bash
+        huggingface-cli login
+        ```
+        Get the token at huggingface.co/settings/tokens
 
 - LambdaLabs
   <details>
@@ -158,7 +163,7 @@ accelerate launch -m axolotl.cli.inference examples/openllama-3b/lora.yml \
   cd axolotl
 
   pip3 install packaging
-  pip3 install -e .[flash-attn,deepspeed]
+  pip3 install -e '.[flash-attn,deepspeed]'
   pip3 install protobuf==3.20.3
   pip3 install -U --ignore-installed requests Pillow psutil scipy
   ```
@@ -180,7 +185,7 @@ Have dataset(s) in one of the following format (JSONL recommended):
   ```json
   {"instruction": "...", "input": "...", "output": "..."}
   ```
-- `sharegpt:chat`: conversations where `from` is `human`/`gpt`
+- `sharegpt`: conversations where `from` is `human`/`gpt`
   ```json
   {"conversations": [{"from": "...", "value": "..."}]}
   ```
@@ -269,11 +274,11 @@ Have dataset(s) in one of the following format (JSONL recommended):
   ```json
   {"prompt": "...", "generation": "..."}
   ```
-- `sharegpt_simple.load_role`: conversations where `role` is used instead of `from`
+- `sharegpt.load_role`: conversations where `role` is used instead of `from`
   ```json
   {"conversations": [{"role": "...", "value": "..."}]}
   ```
-- `sharegpt_simple.load_guanaco`: conversations where `from` is `prompter`/`assistant` instead of default sharegpt
+- `sharegpt.load_guanaco`: conversations where `from` is `prompter`/`assistant` instead of default sharegpt
   ```json
   {"conversations": [{"from": "...", "value": "..."}]}
   ```
@@ -408,6 +413,10 @@ tokenizer_legacy:
 # this is reported to improve training speed on some models
 resize_token_embeddings_to_32x:
 
+# used to identify if the model is falcon/llama based
+is_falcon_derived_model:
+is_llama_derived_model:
+
 # whether you are training a 4-bit GPTQ quantized model
 gptq: true
 gptq_groupsize: 128 # group size
@@ -439,6 +448,7 @@ datasets:
     data_files: # Optional[str] path to source data files
     shards: # Optional[int] number of shards to split data into
     name: # Optional[str] name of dataset configuration to load
+    conversation:  # Optional[str] fastchat conversation type, only used with type: sharegpt
 
   # custom user prompt
   - path: repo
@@ -631,6 +641,8 @@ flash_optimum:
 xformers_attention:
 # whether to use flash attention patch https://github.com/Dao-AILab/flash-attention:
 flash_attention:
+flash_attn_cross_entropy:  # Whether to use flash-attention cross entropy implementation - advanced use only
+flash_attn_rms_norm:  # Whether to use flash-attention rms norm implementation - advanced use only
 # whether to use scaled-dot-product attention
 # https://pytorch.org/docs/stable/generated/torch.nn.functional.scaled_dot_product_attention.html
 sdp_attention:

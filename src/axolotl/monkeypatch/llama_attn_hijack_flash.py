@@ -38,7 +38,11 @@ except ImportError:
 LOG = logging.getLogger("axolotl")
 
 
-def replace_llama_attn_with_flash_attn(packed: Optional[bool] = False):
+def replace_llama_attn_with_flash_attn(
+    packed: Optional[bool] = False,
+    cross_entropy: Optional[bool] = False,
+    rms_norm: Optional[bool] = False,
+):
     transformers.models.llama.modeling_llama.LlamaModel._prepare_decoder_attention_mask = (  # pylint: disable=protected-access
         _prepare_decoder_attention_mask
     )
@@ -49,33 +53,37 @@ def replace_llama_attn_with_flash_attn(packed: Optional[bool] = False):
             llama_model_forward
         )
 
-    try:
-        from flash_attn.losses.cross_entropy import CrossEntropyLoss
+    # skip only if explicitly disabled
+    if cross_entropy:
+        try:
+            from flash_attn.losses.cross_entropy import CrossEntropyLoss
 
-        LOG.info("patching with flash_attn.losses.cross_entropy")
-        transformers.models.llama.modeling_llama.CrossEntropyLoss = partial(
-            CrossEntropyLoss, inplace_backward=True
-        )
-    except ImportError:
-        LOG.info(
-            "optimized flash-attention CrossEntropyLoss not found (run `pip install 'git+https://github.com/Dao-AILab/flash-attention.git#egg=xentropy_cuda_lib&subdirectory=csrc/xentropy'`)"
-        )
+            LOG.info("patching with flash_attn.losses.cross_entropy")
+            transformers.models.llama.modeling_llama.CrossEntropyLoss = partial(
+                CrossEntropyLoss, inplace_backward=True
+            )
+        except ImportError:
+            LOG.info(
+                "optimized flash-attention CrossEntropyLoss not found (run `pip install 'git+https://github.com/Dao-AILab/flash-attention.git#egg=xentropy_cuda_lib&subdirectory=csrc/xentropy'`)"
+            )
 
-    try:
-        from flash_attn.ops.rms_norm import RMSNorm
+    # skip only if explicitly disabled
+    if rms_norm:
+        try:
+            from flash_attn.ops.rms_norm import RMSNorm
 
-        class LlamaRMSNorm(RMSNorm):
-            """Patched LLamaRMSNorm"""
+            class LlamaRMSNorm(RMSNorm):
+                """Patched LLamaRMSNorm"""
 
-            def __init__(self, hidden_size, eps=1e-6):
-                super().__init__(hidden_size, eps=eps)
+                def __init__(self, hidden_size, eps=1e-6):
+                    super().__init__(hidden_size, eps=eps)
 
-        LOG.info("patching with flash_attn.ops.rms_norm")
-        transformers.models.llama.modeling_llama.LlamaRMSNorm = LlamaRMSNorm
-    except ImportError:
-        LOG.info(
-            "optimized flash-attention RMSNorm not found (run `pip install 'git+https://github.com/Dao-AILab/flash-attention.git#egg=dropout_layer_norm&subdirectory=csrc/layer_norm'`)"
-        )
+            LOG.info("patching with flash_attn.ops.rms_norm")
+            transformers.models.llama.modeling_llama.LlamaRMSNorm = LlamaRMSNorm
+        except ImportError:
+            LOG.info(
+                "optimized flash-attention RMSNorm not found (run `pip install 'git+https://github.com/Dao-AILab/flash-attention.git#egg=dropout_layer_norm&subdirectory=csrc/layer_norm'`)"
+            )
 
 
 # Disable the transformation of the attention mask in LlamaModel as the flash attention
@@ -99,6 +107,7 @@ def flashattn_forward(
     past_key_value: Optional[Tuple[torch.Tensor]] = None,
     output_attentions: bool = False,
     use_cache: bool = False,
+    padding_mask: Optional[torch.LongTensor] = None,  # pylint: disable=unused-argument
     cu_seqlens: Optional[torch.Tensor] = None,
     max_seqlen: Optional[torch.Tensor] = None,
 ) -> Tuple[torch.Tensor, Optional[torch.Tensor], Optional[Tuple[torch.Tensor]]]:
@@ -476,6 +485,13 @@ def llama_model_forward(
             dtype=torch.bool,
             device=inputs_embeds.device,
         )
+        padding_mask = None
+    else:
+        if 0 in attention_mask:
+            padding_mask = attention_mask
+        else:
+            padding_mask = None
+
     attention_mask = (
         self._prepare_decoder_attention_mask(  # pylint: disable=protected-access
             attention_mask,
@@ -510,7 +526,9 @@ def llama_model_forward(
             def create_custom_forward(module):
                 def custom_forward(*inputs):
                     # None for past_key_value
-                    return module(*inputs)
+                    return module(
+                        *inputs,
+                    )
 
                 return custom_forward
 
@@ -519,9 +537,10 @@ def llama_model_forward(
                 hidden_states,
                 attention_mask,
                 position_ids,
-                None,
+                past_key_value,
                 output_attentions,
                 None,
+                padding_mask,
                 cu_seqlens,
                 max_seqlen,
             )
@@ -533,6 +552,7 @@ def llama_model_forward(
                 past_key_value=past_key_value,
                 output_attentions=output_attentions,
                 use_cache=use_cache,
+                padding_mask=padding_mask,
                 cu_seqlens=cu_seqlens,
                 max_seqlen=max_seqlen,
             )
@@ -579,6 +599,7 @@ class LlamaDecoderLayer(OriginalLlamaDecoderLayer):
         past_key_value: Optional[Tuple[torch.Tensor]] = None,
         output_attentions: Optional[bool] = False,
         use_cache: Optional[bool] = False,
+        padding_mask: Optional[torch.LongTensor] = None,
         cu_seqlens: Optional[torch.Tensor] = None,
         max_seqlen: Optional[torch.Tensor] = None,
     ) -> Tuple[
@@ -611,6 +632,7 @@ class LlamaDecoderLayer(OriginalLlamaDecoderLayer):
             past_key_value=past_key_value,
             output_attentions=output_attentions,
             use_cache=use_cache,
+            padding_mask=padding_mask,
             cu_seqlens=cu_seqlens,
             max_seqlen=max_seqlen,
         )

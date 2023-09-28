@@ -86,6 +86,22 @@ def normalize_config(cfg):
         or (cfg.model_type and "llama" in cfg.model_type.lower())
     )
 
+    # figure out if the model is falcon
+    cfg.is_falcon_derived_model = (
+        (
+            hasattr(model_config, "model_type")
+            and model_config.model_type
+            in [
+                "falcon",
+                "RefinedWebModel",
+                "RefinedWeb",
+            ]
+        )
+        or cfg.is_falcon_derived_model
+        or "falcon" in cfg.base_model
+        or (cfg.model_type and "rwforcausallm" in cfg.model_type.lower())
+    )
+
     log_gpu_memory_usage(LOG, "baseline", cfg.device)
 
 
@@ -94,7 +110,7 @@ def validate_config(cfg):
         if not cfg.bf16 and not cfg.bfloat16:
             LOG.info("bf16 support detected, but not enabled for this configuration.")
     else:
-        if cfg.bf16 or cfg.bfloat16:
+        if not cfg.merge_lora and (cfg.bf16 or cfg.bfloat16):
             raise ValueError(
                 "bf16 requested, but AMP is not supported on this GPU. Requires Ampere series or above."
             )
@@ -261,6 +277,43 @@ def validate_config(cfg):
                 raise ValueError(
                     "`model_type: MixFormerSequentialForCausalLM` required for sample_packing"
                 )
+
+    if cfg.datasets:
+        for idx, ds_cfg in enumerate(cfg.datasets):
+            if ds_cfg.type == "sharegpt:chat":
+                LOG.warning(
+                    PendingDeprecationWarning(
+                        "`type: sharegpt:chat` will soon be deprecated. simply use `type: sharegpt` instead."
+                    )
+                )
+                cfg.datasets[idx].type = "sharegpt"
+            if "sharegpt_simple" in ds_cfg.type:
+                LOG.warning(
+                    PendingDeprecationWarning(
+                        "`type: sharegpt_simple` will soon be deprecated. simply use `type: sharegpt` instead."
+                    )
+                )
+                cfg.datasets[idx].type = cfg.datasets[idx].type.replace(
+                    "sharegpt_simple", "sharegpt"
+                )
+    if cfg.save_strategy and cfg.save_steps and cfg.save_strategy != "steps":
+        raise ValueError(
+            "save_strategy and save_steps mismatch. Please set save_strategy to 'steps' or remove save_steps."
+        )
+
+    if (
+        cfg.evaluation_strategy
+        and cfg.eval_steps
+        and cfg.evaluation_strategy != "steps"
+    ):
+        raise ValueError(
+            "evaluation_strategy and eval_steps mismatch. Please set evaluation_strategy to 'steps' or remove eval_steps."
+        )
+
+    if cfg.val_set_size == 0 and (cfg.eval_steps or cfg.evaluation_strategy):
+        raise ValueError(
+            "eval_steps and evaluation_strategy are not supported with val_set_size == 0"
+        )
 
     # TODO
     # MPT 7b

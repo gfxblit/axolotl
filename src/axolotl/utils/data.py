@@ -25,7 +25,6 @@ from axolotl.prompt_tokenizers import (
     GPTeacherPromptTokenizingStrategy,
     JeopardyPromptTokenizingStrategy,
     OpenAssistantPromptTokenizingStrategy,
-    ShareGPTPromptTokenizingStrategy,
     SummarizeTLDRPromptTokenizingStrategy,
 )
 from axolotl.prompters import (
@@ -35,7 +34,6 @@ from axolotl.prompters import (
     MultipleChoiceConcisePrompter,
     MultipleChoiceExplainPrompter,
     ReflectAlpacaPrompter,
-    ShareGPTPrompter,
     SummarizeTLDRPrompter,
 )
 from axolotl.utils.dict import DictDefault
@@ -76,7 +74,7 @@ def prepare_dataset(cfg, tokenizer):
 
     with zero_first(is_main_process()):
         train_dataset, eval_dataset = process_datasets_for_packing(
-            cfg, train_dataset, eval_dataset
+            cfg, train_dataset, eval_dataset, tokenizer
         )
     if cfg.max_steps:
         total_num_steps = min(
@@ -207,11 +205,26 @@ def load_tokenized_prepared_datasets(
                     use_auth_token=use_auth_token,
                 )
             else:
-                fp = hf_hub_download(
-                    repo_id=d.path,
-                    repo_type="dataset",
-                    filename=d.data_files,
-                )
+                if isinstance(d.data_files, str):
+                    fp = hf_hub_download(
+                        repo_id=d.path,
+                        repo_type="dataset",
+                        filename=d.data_files,
+                    )
+                elif isinstance(d.data_files, list):
+                    fp = []
+                    for file in d.data_files:
+                        fp.append(
+                            hf_hub_download(
+                                repo_id=d.path,
+                                repo_type="dataset",
+                                filename=file,
+                            )
+                        )
+                else:
+                    raise ValueError(
+                        "data_files must be either a string or list of strings"
+                    )
                 ds = load_dataset(
                     "json", name=d.name, data_files=fp, streaming=False, split=None
                 )
@@ -314,15 +327,6 @@ def load_tokenized_prepared_datasets(
             elif d_base_type == "reflection":
                 ds_strategy = AlpacaReflectionPTStrategy(
                     ReflectAlpacaPrompter(d_prompt_style),
-                    tokenizer,
-                    cfg.train_on_inputs,
-                    cfg.sequence_len,
-                )
-                ds_wrapper = TokenizedPromptDataset(ds_strategy, ds)
-                datasets.append(ds_wrapper)
-            elif d_base_type == "sharegpt":
-                ds_strategy = ShareGPTPromptTokenizingStrategy(
-                    ShareGPTPrompter(d_prompt_style),
                     tokenizer,
                     cfg.train_on_inputs,
                     cfg.sequence_len,
