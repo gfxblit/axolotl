@@ -250,6 +250,10 @@ Have dataset(s) in one of the following format (JSONL recommended):
   ```json
   {"article": "...", "question": "...", "answer": "..."}
   ```
+- `context_qa.load_v2`: in context question answering (alternate)
+  ```json
+  {"context": "...", "question": "...", "answer": "..."}
+  ```
 - `context_qa.load_404`: in context question answering from an article, with default response for no answer from context
   ```json
   {"article": "...", "unanswerable_question": "..."}
@@ -313,7 +317,7 @@ Using file:
 #### How to use your custom pretokenized dataset
 
 - Do not pass a `type:`
-- Dataset must contain `input_ids`, `attention_mask`, `labels` in columns
+- Columns in Dataset must be exactly `input_ids`, `attention_mask`, `labels`
 
 
 ### Config
@@ -356,6 +360,12 @@ See [examples](examples) for quick start. It is recommended to duplicate and mod
     - path: data.jsonl # or json
       ds_type: json # see other options below
       type: alpaca
+
+  # dataset with splits, but no train split
+  dataset:
+    - path: knowrohit07/know_sql
+      type: context_qa.load_v2
+      train_on_split: validation
   ```
 
 - loading
@@ -413,9 +423,10 @@ tokenizer_legacy:
 # this is reported to improve training speed on some models
 resize_token_embeddings_to_32x:
 
-# used to identify if the model is falcon/llama based
+# used to identify which the model is based on
 is_falcon_derived_model:
 is_llama_derived_model:
+is_mistral_derived_model:
 
 # whether you are training a 4-bit GPTQ quantized model
 gptq: true
@@ -476,6 +487,9 @@ datasets:
 dataset_prepared_path: data/last_run_prepared
 # push prepared dataset to hub
 push_dataset_to_hub: # repo path
+# The maximum number of processes to use while preprocessing your input dataset. This defaults to `os.cpu_count()`
+# if not set.
+dataset_processes: # defaults to os.cpu_count() if not set
 # push checkpoints to hub
 hub_model_id: # repo path to push finetuned model
 # how to push checkpoints to hub

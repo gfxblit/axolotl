@@ -75,6 +75,8 @@ def normalize_config(cfg):
     else:
         cfg.torch_dtype = torch.float32
 
+    cfg.dataset_processes = cfg.dataset_processes or os.cpu_count()
+
     model_config = load_model_config(cfg)
     cfg.model_config_type = model_config.model_type
 
@@ -82,7 +84,7 @@ def normalize_config(cfg):
     cfg.is_llama_derived_model = (
         (hasattr(model_config, "model_type") and model_config.model_type == "llama")
         or cfg.is_llama_derived_model
-        or "llama" in cfg.base_model
+        or "llama" in cfg.base_model.lower()
         or (cfg.model_type and "llama" in cfg.model_type.lower())
     )
 
@@ -98,8 +100,21 @@ def normalize_config(cfg):
             ]
         )
         or cfg.is_falcon_derived_model
-        or "falcon" in cfg.base_model
+        or "falcon" in cfg.base_model.lower()
         or (cfg.model_type and "rwforcausallm" in cfg.model_type.lower())
+    )
+
+    cfg.is_mistral_derived_model = (
+        (
+            hasattr(model_config, "model_type")
+            and model_config.model_type
+            in [
+                "mistral",
+            ]
+        )
+        or cfg.is_mistral_derived_model
+        or "mistral" in cfg.base_model.lower()
+        or (cfg.model_type and "mistral" in cfg.model_type.lower())
     )
 
     log_gpu_memory_usage(LOG, "baseline", cfg.device)
@@ -280,6 +295,8 @@ def validate_config(cfg):
 
     if cfg.datasets:
         for idx, ds_cfg in enumerate(cfg.datasets):
+            if not ds_cfg.type:
+                continue
             if ds_cfg.type == "sharegpt:chat":
                 LOG.warning(
                     PendingDeprecationWarning(
