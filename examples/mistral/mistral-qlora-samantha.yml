@@ -1,5 +1,5 @@
-base_model: mistralai/Mistral-7B-v0.1
-base_model_config: mistralai/Mistral-7B-v0.1
+base_model: someone13574/Mistral-7B-v0.1-sharded
+base_model_config: someone13574/Mistral-7B-v0.1-sharded
 model_type: MistralForCausalLM
 tokenizer_type: LlamaTokenizer
 is_mistral_derived_model: true
@@ -28,14 +28,14 @@ lora_target_modules:
 lora_target_linear: true
 lora_fan_in_fan_out:
 
-wandb_project:
+wandb_project: mistral-7b-samantha
 wandb_entity:
 wandb_watch:
 wandb_run_id:
 wandb_log_model:
 
 gradient_accumulation_steps: 1
-micro_batch_size: 1
+micro_batch_size: 8
 num_epochs: 1
 optimizer: paged_adamw_32bit
 lr_scheduler: cosine
